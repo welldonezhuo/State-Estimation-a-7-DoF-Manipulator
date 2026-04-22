@@ -163,9 +163,30 @@ def get_one_obv(panda_sim):
                      Type: numpy.ndarray of shape (7,)
     """
     ########## TODO ##########
-    obv = None
-    
 
+def get_one_obv(panda_sim):
+    obv = None
+
+    # persistent velocity (NOT resetting each loop)
+    v = np.array([0.05, 0.02, -0.05, 0, 0, 0])
+
+    step = 0
+    while obv is None:
+        panda_sim.execute(v)
+
+        if panda_sim.is_collision():
+            # bounce (change direction)
+            v = -v
+            print("[collision] reversing direction")
+
+        if panda_sim.is_touch():
+            print(f"[TOUCH at step {step}]")
+            jpos, _, _ = panda_sim.get_joint_states()
+            obv = np.array(jpos[:7])
+
+        step += 1
+
+    return obv
 
     ##########################
     return obv
@@ -196,15 +217,25 @@ def particle_filter_online(panda_sim, num_particles, sigma=0.05, delta=0.01, plo
         plt.pause(0.01)
 
     ########## TODO ##########
-    num_iters = 100 # The number of iterations. Feel free to change the value
-    for _ in range(num_iters):
-        
+    num_iters = 100
+    for it in range(num_iters):
+        print(f"\n[PF] iteration {it}")
 
+        obv = get_one_obv(panda_sim)
+        print("[PF] got observation")
 
-        
+        weights = cal_weights(particles, obv, sigma)
+        print(f"[PF] weights stats: min={weights.min()}, max={weights.max()}")
 
-        # plot the particles in the visualization
-        if plot: 
+        indices = np.random.choice(len(particles), size=len(particles), p=weights)
+        particles = particles[indices]
+        print("[PF] resampled")
+
+        noise = np.random.normal(0, delta, size=particles.shape)
+        particles = particles + noise
+        print("[PF] added noise")
+
+        if plot:
             utils.plot_pf(ax, particles, panda_sim.loc)
             plt.pause(0.01)
     ##########################
