@@ -216,7 +216,51 @@ def get_one_obv(panda_sim):
                      Type: numpy.ndarray of shape (7,)
     """
     ########## TODO ##########
+    obv = None
+    max_steps = 1000
 
+    # initialize once
+    J = panda_sim.get_jacobian_matrix()
+    q_dot = np.random.uniform(-0.05, 0.05, size=7)
+    v = J @ q_dot
+
+    state = panda_sim.save_state()
+
+    for step in range(max_steps):
+        if step % 500 == 0:
+            print(f"[get_one_obv] step={step}, v_norm={np.linalg.norm(v):.4f}")
+
+        # refresh Jacobian / velocity less often
+        if step % 200 == 0:
+            J = panda_sim.get_jacobian_matrix()
+            q_dot = np.random.uniform(-0.4, 0.4, size=7)
+            v = J @ q_dot
+
+        panda_sim.execute(v)
+
+        if panda_sim.is_collision():
+            print(f"[collision] step={step}")
+
+            panda_sim.restore_state(state)
+
+            J = panda_sim.get_jacobian_matrix()
+            q_dot = np.random.uniform(-0.4, 0.4, size=7)
+            v = J @ q_dot
+            continue
+
+        # save safe state less often
+        if step % 200 == 0:
+            state = panda_sim.save_state()
+
+        if panda_sim.is_touch():
+            print(f"[TOUCH] step={step}")
+            jpos, _, _ = panda_sim.get_joint_states()
+            obv = np.array(jpos[:7])
+            panda_sim.execute(-v)
+            return obv
+
+    jpos, _, _ = panda_sim.get_joint_states()
+    obv = np.array(jpos[:7])
     ##########################
     return obv
 
@@ -248,7 +292,35 @@ def particle_filter_online(panda_sim, num_particles, sigma=0.05, delta=0.01, plo
         plt.pause(0.01)
 
     ########## TODO ##########
+    for it in range(200):
+        print(f"\n[PF] iteration {it}")
+        obv = get_one_obv(panda_sim)
+        print("[PF] got observation")
+
+        weights = cal_weights(particles, obv, sigma)
+        keep_ratio = 0.70
+        weights = (1 - keep_ratio) * weights + keep_ratio / num_particles
+        weights = weights / np.sum(weights)
+        print(f"[PF] weights min={weights.min()}, max={weights.max()}")
+
+        indices = np.random.choice(
+            len(particles), size=len(particles), p=weights)
+        particles = particles[indices]
+        print("[PF] resampled")
+
+        noise = np.random.normal(0, delta, size=particles.shape)
+        particles = particles + noise
+        particles[:, 2] = wrap_angle(particles[:, 2])
+        particles[:, 0] = np.clip(particles[:, 0], -1, 1)
+        particles[:, 1] = np.clip(particles[:, 1], -1, 1)
+        print(f"[PF] mean={particles.mean(0)}")
+
+        weights = np.ones(num_particles) / num_particles
+
+        if plot:
+            utils.plot_pf(ax, particles, panda_sim.loc)
+            plt.pause(0.01)
 
     ##########################
-    est = estimate_pose(particles)
+    est = particles.mean(0)
     return est
