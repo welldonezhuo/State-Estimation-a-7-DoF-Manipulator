@@ -125,45 +125,6 @@ def particle_filter(panda_sim, obvs, num_particles, sigma=0.05, delta=0.01, plot
                         Type: numpy.ndarray of shape (3,)
     """
 
-    ############ helper ##############################
-
-    def wrap_angle(theta):
-        return (theta + np.pi) % (2 * np.pi) - np.pi
-
-    def estimate_pose(particles, weights=None):
-        """
-        Estimate [x, y, theta] from particles, using a circular mean for theta.
-        """
-        if weights is None:
-            weights = np.ones(len(particles)) / len(particles)
-
-        x_est = np.sum(weights * particles[:, 0])
-        y_est = np.sum(weights * particles[:, 1])
-        sin_theta = np.sum(weights * np.sin(particles[:, 2]))
-        cos_theta = np.sum(weights * np.cos(particles[:, 2]))
-        theta_est = np.arctan2(sin_theta, cos_theta)
-        return np.array([x_est, y_est, theta_est])
-
-    def systematic_resample(weights):
-        """
-        Low-variance resampling for particle filters.
-        """
-        n = len(weights)
-        positions = (np.random.rand() + np.arange(n)) / n
-        cumsum = np.cumsum(weights)
-        indices = np.zeros(n, dtype=int)
-
-        i, j = 0, 0
-        while i < n:
-            if positions[i] < cumsum[j]:
-                indices[i] = j
-                i += 1
-            else:
-                j += 1
-        return indices
-
-        ############ helper ##############################
-
     # initialize the particles and weights
     particles = np.random.uniform(
         low=[-1, -1, -np.pi], high=[1, 1, np.pi], size=(num_particles, 3))
@@ -179,6 +140,46 @@ def particle_filter(panda_sim, obvs, num_particles, sigma=0.05, delta=0.01, plot
         panda_sim.set_joint_values(obv)
 
         ########## TODO ##########
+
+        ############ helper ##############################
+
+        def wrap_angle(theta):
+            return (theta + np.pi) % (2 * np.pi) - np.pi
+
+        def estimate_pose(particles, weights=None):
+            """
+            Estimate [x, y, theta] from particles, using a circular mean for theta.
+            """
+            if weights is None:
+                weights = np.ones(len(particles)) / len(particles)
+
+            x_est = np.sum(weights * particles[:, 0])
+            y_est = np.sum(weights * particles[:, 1])
+            sin_theta = np.sum(weights * np.sin(particles[:, 2]))
+            cos_theta = np.sum(weights * np.cos(particles[:, 2]))
+            theta_est = np.arctan2(sin_theta, cos_theta)
+            return np.array([x_est, y_est, theta_est])
+
+        def systematic_resample(weights):
+            """
+            Low-variance resampling for particle filters.
+            """
+            n = len(weights)
+            positions = (np.random.rand() + np.arange(n)) / n
+            cumsum = np.cumsum(weights)
+            indices = np.zeros(n, dtype=int)
+
+            i, j = 0, 0
+            while i < n:
+                if positions[i] < cumsum[j]:
+                    indices[i] = j
+                    i += 1
+                else:
+                    j += 1
+            return indices
+
+            ############ helper ##############################
+
         # update particle weights using current observation
         weights = cal_weights(particles, obv, sigma)
 
