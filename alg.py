@@ -14,44 +14,6 @@ SPH_RADIUS = 0.02
 FK_Solver = utils.FKSolver()  # forward kinematics solver
 
 
-def wrap_angle(theta):
-    return (theta + np.pi) % (2 * np.pi) - np.pi
-
-
-def estimate_pose(particles, weights=None):
-    """
-    Estimate [x, y, theta] from particles, using a circular mean for theta.
-    """
-    if weights is None:
-        weights = np.ones(len(particles)) / len(particles)
-
-    x_est = np.sum(weights * particles[:, 0])
-    y_est = np.sum(weights * particles[:, 1])
-    sin_theta = np.sum(weights * np.sin(particles[:, 2]))
-    cos_theta = np.sum(weights * np.cos(particles[:, 2]))
-    theta_est = np.arctan2(sin_theta, cos_theta)
-    return np.array([x_est, y_est, theta_est])
-
-
-def systematic_resample(weights):
-    """
-    Low-variance resampling for particle filters.
-    """
-    n = len(weights)
-    positions = (np.random.rand() + np.arange(n)) / n
-    cumsum = np.cumsum(weights)
-    indices = np.zeros(n, dtype=int)
-
-    i, j = 0, 0
-    while i < n:
-        if positions[i] < cumsum[j]:
-            indices[i] = j
-            i += 1
-        else:
-            j += 1
-    return indices
-
-
 ########## Task 1: Particle Weights Calculation ##########
 
 def dist_to_closest_obs(x, y):
@@ -162,6 +124,46 @@ def particle_filter(panda_sim, obvs, num_particles, sigma=0.05, delta=0.01, plot
     returns:       est: The estimate of the pose of the robot base.
                         Type: numpy.ndarray of shape (3,)
     """
+
+    ############ helper ##############################
+
+    def wrap_angle(theta):
+        return (theta + np.pi) % (2 * np.pi) - np.pi
+
+    def estimate_pose(particles, weights=None):
+        """
+        Estimate [x, y, theta] from particles, using a circular mean for theta.
+        """
+        if weights is None:
+            weights = np.ones(len(particles)) / len(particles)
+
+        x_est = np.sum(weights * particles[:, 0])
+        y_est = np.sum(weights * particles[:, 1])
+        sin_theta = np.sum(weights * np.sin(particles[:, 2]))
+        cos_theta = np.sum(weights * np.cos(particles[:, 2]))
+        theta_est = np.arctan2(sin_theta, cos_theta)
+        return np.array([x_est, y_est, theta_est])
+
+    def systematic_resample(weights):
+        """
+        Low-variance resampling for particle filters.
+        """
+        n = len(weights)
+        positions = (np.random.rand() + np.arange(n)) / n
+        cumsum = np.cumsum(weights)
+        indices = np.zeros(n, dtype=int)
+
+        i, j = 0, 0
+        while i < n:
+            if positions[i] < cumsum[j]:
+                indices[i] = j
+                i += 1
+            else:
+                j += 1
+        return indices
+
+        ############ helper ##############################
+
     # initialize the particles and weights
     particles = np.random.uniform(
         low=[-1, -1, -np.pi], high=[1, 1, np.pi], size=(num_particles, 3))
@@ -304,6 +306,30 @@ def particle_filter_online(panda_sim, num_particles, sigma=0.05, delta=0.01, plo
     # Otherwise compute particle weights, resample, and perturb particles with Gaussian noise.
     # Wrap theta and clip x/y to keep particles inside the valid state range.
     # Reset weights to uniform after resampling and report the final particle mean.
+
+    ###################### helper ######################
+
+    def wrap_angle(theta):
+        return (theta + np.pi) % (2 * np.pi) - np.pi
+
+    def systematic_resample(weights):
+        """
+        Low-variance resampling for particle filters.
+        """
+        n = len(weights)
+        positions = (np.random.rand() + np.arange(n)) / n
+        cumsum = np.cumsum(weights)
+        indices = np.zeros(n, dtype=int)
+
+        i, j = 0, 0
+        while i < n:
+            if positions[i] < cumsum[j]:
+                indices[i] = j
+                i += 1
+            else:
+                j += 1
+        return indices
+    ###################### helper ######################
 
     for it in range(200):
         print(f"\n[PF] iteration {it}")
