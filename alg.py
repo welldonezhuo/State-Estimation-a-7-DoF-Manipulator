@@ -56,10 +56,10 @@ def systematic_resample(weights):
 
 def dist_to_closest_obs(x, y):
     """
-    Find the distance between the stick's sphere end centered at (x, y) 
+    Find the distance between the stick's sphere end centered at (x, y)
     to its closest cylinder obstacle.
     args:       x: The x-coordinate of the spherical end.
-                y: The y-coordinate of the spherical end. 
+                y: The y-coordinate of the spherical end.
     returns: dist: The distance to the closest obstacle.
     """
     ########## TODO ##########
@@ -87,7 +87,7 @@ def cal_weights(particles, obv, sigma=0.05):
     Calculate the weights for particles based on the given observation.
     args:  particles: The particles represented by their states
                       Type: numpy.ndarray of shape (# of particles, 3)
-                 obv: The given observation (the robot's joint angles). 
+                 obv: The given observation (the robot's joint angles).
                       Type: numpy.ndarray of shape (7,)
                sigma: The standard deviation of the Gaussian distribution
                       for calculating likelihood (default: 0.05).
@@ -128,7 +128,7 @@ def most_likely_particle(particles, obv):
     Find the most likely particle.
     args:  particles: The particles represented by their states
                       Type: numpy.ndarray of shape (# of particles, 3)
-                 obv: The given observation (the robot's joint angles). 
+                 obv: The given observation (the robot's joint angles).
                       Type: numpy.ndarray of shape (7,)
     returns:     idx: The index of the most likely particle
                       Type: int
@@ -147,19 +147,19 @@ def most_likely_particle(particles, obv):
 
 def particle_filter(panda_sim, obvs, num_particles, sigma=0.05, delta=0.01, plot=True):
     """
-    The Particle Filtering algorithm. 
-    args:    panda_sim: The instance of the simulation. 
+    The Particle Filtering algorithm.
+    args:    panda_sim: The instance of the simulation.
                         Type: sim.PandaSim (provided)
                   obvs: The given observations (the robot's joint angles)
                         Type: numpy.ndarray of shape (# of observations, 7)
-         num_particles: The number of particles. 
+         num_particles: The number of particles.
                         Type: int
                  sigma: The standard deviation of the Gaussian distribution
                         for calculating likelihood (default: 0.05).
                  delta: The scale of the Gaussian for perturbing particles.
                         (default: 0.01)
                   plot: Whether to enable particle plot (True or False).
-    returns:       est: The estimate of the pose of the robot base. 
+    returns:       est: The estimate of the pose of the robot base.
                         Type: numpy.ndarray of shape (3,)
     """
     # initialize the particles and weights
@@ -210,117 +210,147 @@ def particle_filter(panda_sim, obvs, num_particles, sigma=0.05, delta=0.01, plot
 def get_one_obv(panda_sim):
     """
     Control the robot in simulation to obtain an observation.
-    args: panda_sim: The instance of the simulation. 
+    args: panda_sim: The instance of the simulation.
                      Type: sim.PandaSim (provided)
     returns:    obv: One observation found by this function.
                      Type: numpy.ndarray of shape (7,)
     """
     ########## TODO ##########
-    obv = None
-    max_steps = 1000
+    # Search online for one valid touch observation.
+    # Start from a random Cartesian command generated through the current Jacobian.
+    # Keep a saved simulator state so we can roll back when motion causes collision.
+    # Only a touch from the stick tip is accepted as a valid observation.
+    # Ordinary collisions are rejected and trigger a new random motion direction.
+    # If no touch is found within the step budget, return None to mark timeout.
 
-    # initialize once
+    obv = None
+    max_steps = 500
+
+    # Start from one random Cartesian command induced by a random joint velocity.
     J = panda_sim.get_jacobian_matrix()
     q_dot = np.random.uniform(-0.05, 0.05, size=7)
     v = J @ q_dot
 
+    # Keep a rollback point so invalid collisions do not change the search state.
     state = panda_sim.save_state()
 
     for step in range(max_steps):
         if step % 500 == 0:
             print(f"[get_one_obv] step={step}, v_norm={np.linalg.norm(v):.4f}")
 
-        # refresh Jacobian / velocity less often
         if step % 200 == 0:
+            # Refresh the Cartesian command periodically to avoid getting stuck.
             J = panda_sim.get_jacobian_matrix()
             q_dot = np.random.uniform(-0.4, 0.4, size=7)
             v = J @ q_dot
 
         panda_sim.execute(v)
 
-        if panda_sim.is_collision():
-            print(f"[collision] step={step}")
+        # check real touch first
+        if panda_sim.is_touch():
+            print(f"[TOUCH] step={step}")
+            jpos, _, _ = panda_sim.get_joint_states()
+            obv = np.array(jpos[:7])
 
+            # After a valid touch, revert to the last safe state for the next search.
             panda_sim.restore_state(state)
+            return obv
+
+        # Other collision is invalid, do not use it as observation
+        if panda_sim.is_collision():
+            if step < 20:
+                panda_sim.set_joint_values(sim.pandaStartJoints)
+                state = panda_sim.save_state()
+                continue
 
             J = panda_sim.get_jacobian_matrix()
             q_dot = np.random.uniform(-0.4, 0.4, size=7)
             v = J @ q_dot
             continue
 
-        # save safe state less often
         if step % 200 == 0:
+            # Update the rollback point only after a valid non-colliding move.
             state = panda_sim.save_state()
 
-        if panda_sim.is_touch():
-            print(f"[TOUCH] step={step}")
-            jpos, _, _ = panda_sim.get_joint_states()
-            obv = np.array(jpos[:7])
-            panda_sim.execute(-v)
-            return obv
-
-    jpos, _, _ = panda_sim.get_joint_states()
-    obv = np.array(jpos[:7])
+    print("[TIMEOUT] hit max_steps without touch")
+    return None
     ##########################
     return obv
 
 
 def particle_filter_online(panda_sim, num_particles, sigma=0.05, delta=0.01, plot=True):
     """
-    The online Particle Filtering algorithm. 
-    args:     panda_sim: The instance of the simulation. 
-                         Type: sim.PandaSim (provided)
-          num_particles: The number of particles. 
-                         Type: int
-                  sigma: The standard deviation of the Gaussian distribution
-                         for calculating likelihood (default: 0.05).
-                  delta: The scale of the Gaussian for perturbing particles.
-                         (default: 0.01)
-                   plot: Whether to enable particle plot (True or False).
-    returns:        est: The estimate of the pose of the robot base. 
-                         Type: numpy.ndarray of shape (3,)
+    The online Particle Filtering algorithm.
     """
-    # # initialize the particles and weights
     particles = np.random.uniform(
-        low=[-1, -1, -np.pi], high=[1, 1, np.pi], size=(num_particles, 3))
+        low=[-1, -1, -np.pi],
+        high=[1, 1, np.pi],
+        size=(num_particles, 3)
+    )
     weights = np.ones(shape=(num_particles,)) / num_particles
 
-    # configure the visualization
     if plot:
         ax = utils.config_plot_ax()
         utils.plot_pf(ax, particles, panda_sim.loc)
         plt.pause(0.01)
 
+    timeout_count = 0
+    touch_count = 0
+
     ########## TODO ##########
+    # Run the online particle filter for a fixed number of iterations.
+    # At each iteration, collect one observation from simulation.
+    # If no observation is found, skip the filter update and track the timeout.
+    # Otherwise compute particle weights, resample, and perturb particles with Gaussian noise.
+    # Wrap theta and clip x/y to keep particles inside the valid state range.
+    # Reset weights to uniform after resampling and report the final particle mean.
+
     for it in range(200):
         print(f"\n[PF] iteration {it}")
+
         obv = get_one_obv(panda_sim)
-        print("[PF] got observation")
+
+        if obv is None:
+            timeout_count += 1
+            print(
+                f"[PF] timeout_count={timeout_count}, touch_count={touch_count}")
+            continue
+
+        touch_count += 1
+        print("[PF] valid touch observation collected")
+        print(f"[PF] timeout_count={timeout_count}, touch_count={touch_count}")
 
         weights = cal_weights(particles, obv, sigma)
-        keep_ratio = 0.70
-        weights = (1 - keep_ratio) * weights + keep_ratio / num_particles
         weights = weights / np.sum(weights)
-        print(f"[PF] weights min={weights.min()}, max={weights.max()}")
 
-        indices = np.random.choice(
-            len(particles), size=len(particles), p=weights)
+        print(
+            f"[PF] weights min={weights.min():.6e}, "
+            f"max={weights.max():.6e}, std={weights.std():.6e}"
+        )
+
+        # Draw a new particle set according to the current posterior weights.
+        indices = systematic_resample(weights)
         particles = particles[indices]
-        print("[PF] resampled")
 
+        # Add Gaussian roughening so particles do not collapse to identical states.
         noise = np.random.normal(0, delta, size=particles.shape)
         particles = particles + noise
+
+        # Keep the state inside the valid plotting / state bounds.
         particles[:, 2] = wrap_angle(particles[:, 2])
         particles[:, 0] = np.clip(particles[:, 0], -1, 1)
         particles[:, 1] = np.clip(particles[:, 1], -1, 1)
-        print(f"[PF] mean={particles.mean(0)}")
 
         weights = np.ones(num_particles) / num_particles
+
+        print(f"[PF] mean={particles.mean(0)}")
 
         if plot:
             utils.plot_pf(ax, particles, panda_sim.loc)
             plt.pause(0.01)
 
+    print(
+        f"\n[PF summary] timeout_count={timeout_count}, touch_count={touch_count}")
     ##########################
     est = particles.mean(0)
     return est
